@@ -345,7 +345,9 @@ def predict_route(input_text, max_depth):
 
         # Product for this step
         pname = _smiles_to_name(s["product"])
-        parts.append(f"  --> {f'**{pname}**' if pname else f'`{s[\"product\"]}`'}")
+        prod_smi = s["product"]
+        prod_label = f"**{pname}**" if pname else f"`{prod_smi}`"
+        parts.append(f"  --> {prod_label}")
         parts.append("")
 
     summary = "\n".join(parts)
