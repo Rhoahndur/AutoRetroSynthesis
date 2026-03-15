@@ -16,6 +16,7 @@ class GPTConfig:
     n_layer: int = 4
     n_head: int = 4
     n_embd: int = 256
+    dropout: float = 0.0
 
 
 def norm(x):
@@ -75,10 +76,11 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalSelfAttention(config)
         self.mlp = MLP(config)
+        self.drop = nn.Dropout(config.dropout)
 
     def forward(self, x, cos_sin):
-        x = x + self.attn(norm(x), cos_sin)
-        x = x + self.mlp(norm(x))
+        x = x + self.drop(self.attn(norm(x), cos_sin))
+        x = x + self.drop(self.mlp(norm(x)))
         return x
 
 

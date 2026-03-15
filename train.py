@@ -32,6 +32,7 @@ DEPTH = 4               # number of transformer layers
 N_EMBD = 256            # model embedding dimension
 N_HEAD = 4              # number of attention heads
 HEAD_DIM = N_EMBD // N_HEAD  # = 64
+DROPOUT = 0.1           # dropout rate (regularization)
 
 # Optimization
 TOTAL_BATCH_SIZE = 2**14  # ~16K tokens per optimizer step
@@ -95,6 +96,7 @@ config = GPTConfig(
     n_layer=DEPTH,
     n_head=N_HEAD,
     n_embd=N_EMBD,
+    dropout=DROPOUT,
 )
 print(f"Model config: {asdict(config)}")
 
