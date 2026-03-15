@@ -9,6 +9,7 @@ import os
 import pickle
 from io import BytesIO
 
+import numpy as np
 import torch
 import gradio as gr
 from PIL import Image
@@ -70,21 +71,23 @@ def load_building_blocks():
 # ---------------------------------------------------------------------------
 
 def smiles_to_image(smiles, size=(300, 300)):
-    """Render a SMILES string as a 2D structure image."""
+    """Render a SMILES string as a 2D structure image, returned as numpy array."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return None
-    return Draw.MolToImage(mol, size=size)
+    img = Draw.MolToImage(mol, size=size)
+    return np.array(img)
 
 def multi_smiles_to_image(smiles_list, size=(300, 300)):
-    """Render multiple SMILES as a grid image."""
+    """Render multiple SMILES as a grid image, returned as numpy array."""
     mols = []
     for s in smiles_list:
         mol = Chem.MolFromSmiles(s)
         mols.append(mol)  # None is ok, Draw handles it
     if not mols:
         return None
-    return Draw.MolsToGridImage(mols, molsPerRow=min(len(mols), 4), subImgSize=size)
+    img = Draw.MolsToGridImage(mols, molsPerRow=min(len(mols), 4), subImgSize=size)
+    return np.array(img)
 
 # ---------------------------------------------------------------------------
 # Retrosynthesis prediction
@@ -330,8 +333,8 @@ with gr.Blocks(title="RetroSynth") as demo:
                     gr.Button(name, size="sm").click(fn=lambda n=name: set_demo(n), outputs=input_box)
 
     with gr.Row():
-        target_image = gr.Image(label="Target molecule", type="pil")
-        reactant_image = gr.Image(label="Predicted reactants (step 1)", type="pil")
+        target_image = gr.Image(label="Target molecule", type="numpy")
+        reactant_image = gr.Image(label="Predicted reactants (step 1)", type="numpy")
 
     route_output = gr.Markdown(label="Synthesis route")
 
