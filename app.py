@@ -255,10 +255,55 @@ def resolve_molecule_name(name_or_smiles):
 
     return name_or_smiles  # return as-is, let SMILES parsing handle errors
 
+def _smiles_to_name(smiles):
+    """Try to get a common name for a SMILES string."""
+    try:
+        import pubchempy as pcp
+        results = pcp.get_compounds(smiles, "smiles")
+        if results and results[0].iupac_name:
+            name = results[0].iupac_name
+            # Use synonym if available (shorter/more recognizable)
+            if results[0].synonyms:
+                name = results[0].synonyms[0]
+            return name
+    except Exception:
+        pass
+    return None
+
+def _render_step_image(product_smiles, reactant_smiles_list, step_num):
+    """Render a single retrosynthesis step as one image with product and reactants."""
+    from rdkit.Chem import Draw, AllChem
+
+    mols = []
+    legends = []
+
+    # Product first
+    prod_mol = Chem.MolFromSmiles(product_smiles)
+    if prod_mol:
+        mols.append(prod_mol)
+        name = _smiles_to_name(product_smiles)
+        legends.append(f"Product" if not name else f"Product: {name}")
+
+    # Then reactants
+    for i, r in enumerate(reactant_smiles_list):
+        mol = Chem.MolFromSmiles(r)
+        if mol:
+            mols.append(mol)
+            name = _smiles_to_name(r)
+            label = f"Reactant {i+1}" if not name else f"Reactant: {name}"
+            legends.append(label)
+
+    if not mols:
+        return None
+
+    img = Draw.MolsToGridImage(mols, molsPerRow=min(len(mols), 4),
+                                subImgSize=(300, 300), legends=legends)
+    return np.array(img)
+
 def predict_route(input_text, max_depth):
     """Main prediction function for Gradio."""
     if not input_text or not input_text.strip():
-        return "Please enter a molecule name or SMILES string.", None, ""
+        return "Please enter a molecule name or SMILES string.", None, None
 
     # Resolve name to SMILES
     smiles = resolve_molecule_name(input_text.strip())
@@ -266,38 +311,48 @@ def predict_route(input_text, max_depth):
     # Draw the target molecule
     target_img = smiles_to_image(smiles, size=(400, 400))
     if target_img is None:
-        return f"Could not parse molecule: {smiles}", None, ""
+        return f"Could not parse molecule: `{smiles}`", None, None
+
+    # Look up common name
+    target_name = _smiles_to_name(smiles)
+    target_label = f"**{target_name}**" if target_name else ""
 
     # Multi-step retrosynthesis
     tree = predict_multi_step(smiles, max_depth=int(max_depth))
 
-    # Format as markdown
-    md_lines = format_tree_as_markdown(tree)
-    route_md = "\n".join(md_lines)
-
-    # Get flattened steps for display
+    # Get flattened steps
     steps = tree_to_steps(tree)
-    if steps:
-        step_text = []
-        for s in steps:
-            reactant_labels = []
-            for r, b in zip(s["reactants"], s["buyable_reactants"]):
-                label = f"{r} (buyable)" if b else r
-                reactant_labels.append(label)
-            step_text.append(f"**Step {s['step']}:** {' + '.join(reactant_labels)} --> {s['product']}")
-        steps_md = "\n\n".join(step_text)
-    else:
-        steps_md = "No synthesis steps predicted."
 
-    # Create reactant images for the first step
-    if steps:
-        last_step = steps[-1]  # the final step produces the target
-        all_mols = last_step["reactants"]
-        reactant_img = multi_smiles_to_image(all_mols, size=(250, 250))
-    else:
-        reactant_img = None
+    if not steps:
+        error = tree.get("error", "Unknown error")
+        summary = f"## Target: {target_label}\n`{smiles}`\n\n**Could not predict a route:** {error}"
+        return summary, target_img, None
 
-    summary = f"**Target:** `{smiles}`\n\n**Route ({len(steps)} steps):**\n\n{steps_md}\n\n---\n\n**Full tree:**\n\n{route_md}"
+    # Build visual summary
+    parts = [f"## Target: {target_label}", f"`{smiles}`", "", f"### Synthesis Route ({len(steps)} steps)", ""]
+
+    for s in steps:
+        parts.append(f"**Step {s['step']}:**")
+        reactant_parts = []
+        for r, b in zip(s["reactants"], s["buyable_reactants"]):
+            rname = _smiles_to_name(r)
+            if rname:
+                label = f"**{rname}**" if not b else f"**{rname}** (buyable)"
+            else:
+                label = f"`{r}`" if not b else f"`{r}` (buyable)"
+            reactant_parts.append(label)
+        parts.append(" + ".join(reactant_parts))
+
+        # Product for this step
+        pname = _smiles_to_name(s["product"])
+        parts.append(f"  --> {f'**{pname}**' if pname else f'`{s[\"product\"]}`'}")
+        parts.append("")
+
+    summary = "\n".join(parts)
+
+    # Render the final step (target synthesis) as the reactant image
+    last_step = steps[-1]
+    reactant_img = _render_step_image(last_step["product"], last_step["reactants"], len(steps))
 
     return summary, target_img, reactant_img
 
