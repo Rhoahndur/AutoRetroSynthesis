@@ -24,5 +24,5 @@ variable "allowed_ssh_cidr" {
 variable "repo_url" {
   description = "Git repository URL to clone"
   type        = string
-  default     = "https://github.com/karpathy/autoresearch.git"
+  default     = "https://github.com/Rhoahndur/AutoRetroSynthesis.git"
 }
