@@ -509,6 +509,16 @@ def evaluate_retro_accuracy(model, device):
                 if pred_canonical == gt_canonical:
                     correct += 1
 
+            # Progress indicator every 100 examples
+            if (i + 1) % 100 == 0:
+                print(f"\r  eval: {i+1}/{n_eval} (acc={correct}/{i+1}, valid={valid_count}/{i+1})", end="", flush=True)
+
+    if n_eval >= 100:
+        print()  # newline after progress
+
+    # Restore RDKit logging
+    RDLogger.logger().setLevel(RDLogger.ERROR)
+
     accuracy = correct / n_eval if n_eval > 0 else 0.0
     validity = valid_count / n_eval if n_eval > 0 else 0.0
     return accuracy, validity
