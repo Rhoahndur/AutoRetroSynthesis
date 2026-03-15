@@ -447,9 +447,9 @@ def evaluate_retro_accuracy(model, device):
     Evaluate retrosynthesis top-1 exact-match accuracy on validation set.
     Returns (accuracy, validity) as floats in [0, 1].
     """
-    # Suppress RDKit warnings during eval (model outputs lots of invalid SMILES)
+    # Fully suppress RDKit C++ warnings during eval (model outputs lots of invalid SMILES)
     from rdkit import RDLogger
-    RDLogger.logger().setLevel(RDLogger.CRITICAL)
+    RDLogger.DisableLog("rdApp.*")
 
     tokenizer = SMILESTokenizer.from_file()
     data = torch.load(os.path.join(DATA_DIR, "val_data.pt"), map_location="cpu", weights_only=True)
@@ -517,7 +517,7 @@ def evaluate_retro_accuracy(model, device):
         print()  # newline after progress
 
     # Restore RDKit logging
-    RDLogger.logger().setLevel(RDLogger.ERROR)
+    RDLogger.EnableLog("rdApp.*")
 
     accuracy = correct / n_eval if n_eval > 0 else 0.0
     validity = valid_count / n_eval if n_eval > 0 else 0.0
