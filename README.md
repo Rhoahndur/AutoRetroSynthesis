@@ -1,28 +1,43 @@
-# autoresearch
+# RetroSynth Autoresearch
 
-![teaser](progress.png)
+**Autonomous AI-driven retrosynthesis model optimization.**
 
-*One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began. -@karpathy, March 2026*.
+An AI agent autonomously experiments with model architecture, hyperparameters, and training strategies to improve a retrosynthesis prediction model -- predicting how to synthesize target molecules from available starting materials.
 
----
+Built on the [autoresearch](https://github.com/karpathy/autoresearch) framework by Andrej Karpathy, which introduced the idea of letting AI agents run ML experiments autonomously in a keep/discard loop. This project adapts that framework from language model pretraining to **chemical retrosynthesis prediction** on the [USPTO-50K](https://huggingface.co/datasets/pingzhili/uspto-50k) dataset, demonstrating that the autonomous experimentation pattern generalizes beyond text.
 
-## What is autoresearch?
+## How it works
 
-Autoresearch flips the traditional ML research workflow: instead of a human manually tweaking training code, you write a research strategy in Markdown (`program.md`) and let an AI agent experiment autonomously. The agent modifies the training script, runs a 5-minute experiment, checks if validation loss improved, keeps or discards the change, and loops forever. Go to sleep, wake up to ~100 completed experiments and a better model.
+An AI coding agent (Claude, Codex, etc.) sits in a loop:
 
-The training code is a simplified single-GPU implementation of [nanochat](https://github.com/karpathy/nanochat). More context in this [tweet](https://x.com/karpathy/status/2029701092347630069).
+```
+1. Modify train.py (architecture, optimizer, hyperparameters, etc.)
+2. Train the model for 5 minutes
+3. Evaluate retrosynthesis accuracy on validation set
+4. If accuracy improved → keep the change
+   If accuracy didn't improve → revert
+5. Log results to results.tsv
+6. Repeat forever
+```
 
----
+The model learns to predict **reactants from products**: given a target molecule as a SMILES string, generate the precursor molecules needed to synthesize it.
+
+```
+Input:   CC(=O)Oc1ccccc1C(=O)O          (aspirin)
+Output:  CC(=O)OC(=O)C.OC(=O)c1ccccc1O  (acetic anhydride + salicylic acid)
+```
+
+The Gradio frontend provides multi-step retrosynthesis -- recursively decomposing complex molecules until all precursors are commercially available building blocks.
 
 ## Quick Start
 
 ### Requirements
 
-- Single NVIDIA GPU (tested on H100; see [Platform Support](#platform-support) for smaller hardware)
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) package manager
+- For real training: NVIDIA GPU (tested on T4/A10G via AWS). CPU/MPS works for testing.
 
-### 1. Install and prepare
+### 1. Install and prepare data
 
 ```bash
 # Install uv (if needed)
@@ -31,187 +46,148 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Install dependencies
 uv sync
 
-# Download data and train tokenizer (one-time, ~2 min)
+# Download USPTO-50K, build tokenizer, extract building blocks (~2 min)
 uv run prepare.py
+
+# For local testing with a tiny subset (500 reactions):
+uv run prepare.py --tiny
 ```
 
-### 2. Run a single experiment manually
+### 2. Run a single training experiment
 
 ```bash
+# Full 5-minute run (GPU)
 uv run train.py
+
+# Quick 30-second test (CPU/MPS)
+TIME_BUDGET=30 uv run train.py
 ```
 
-This trains a small GPT model for 5 minutes and prints a summary:
-
+Output:
 ```
 ---
-val_bpb:          0.997900
+val_accuracy:     0.120000
+val_validity:     0.850000
 training_seconds: 300.1
-total_seconds:    325.9
-peak_vram_mb:     45060.2
-mfu_percent:      39.80
-total_tokens_M:   499.6
-num_steps:        953
-num_params_M:     50.3
-depth:            8
+total_seconds:    340.2
+peak_vram_mb:     2048.0
+total_tokens_M:   12.5
+num_steps:        500
+num_params_M:     2.1
+depth:            4
 ```
 
-The primary metric is **val_bpb** (validation bits per byte) -- lower is better.
+### 3. Launch the autonomous agent
 
-### 3. Go autonomous
-
-Point your AI coding agent (Claude Code, Codex, etc.) at the repo with permissions disabled, then prompt:
+Point your AI coding agent at the repo with permissions disabled:
 
 ```
-Hi have a look at program.md and let's kick off a new experiment! let's do the setup first.
+Hi, have a look at program.md and let's kick off a new experiment! Let's do the setup first.
 ```
 
-The agent will create a branch, establish a baseline, then loop indefinitely -- modifying `train.py`, running experiments, keeping improvements, discarding regressions, and logging everything to `results.tsv`.
+The agent creates a branch, establishes a baseline, then loops indefinitely -- modifying `train.py`, running experiments, keeping improvements, and logging everything to `results.tsv`.
 
----
+### 4. Launch the frontend
 
-## Use Cases
+```bash
+uv run app.py
+```
 
-### Overnight autonomous research
+Opens a Gradio web UI where you can input molecules (SMILES or common names like "aspirin") and see predicted retrosynthesis routes with 2D structure drawings.
 
-The primary use case. Leave the agent running while you sleep. Each experiment takes ~5 minutes, so you get ~12 experiments/hour or ~100 overnight. The agent explores architecture changes, hyperparameter sweeps, optimizer tweaks, and activation functions -- all without human intervention.
+### 5. Visualize progress
 
-### Interactive experimentation
-
-Use autoresearch as a rapid prototyping bench. Tell the agent a specific hypothesis ("try SwiGLU instead of ReLU-squared", "double the depth and halve the width") and watch it test the idea in 5 minutes. The fixed time budget makes every experiment directly comparable regardless of what changed.
-
-### Learning and teaching
-
-The entire training pipeline fits in two files. `prepare.py` covers tokenization, data loading, and evaluation. `train.py` covers the full transformer architecture, a modern optimizer (Muon + AdamW), and the training loop. Reading and modifying these files is a hands-on crash course in LLM pretraining. If you are new to neural networks, this ["Dummy's Guide"](https://x.com/hooeem/status/2030720614752039185) provides a lot more context.
-
-### Benchmarking your GPU
-
-Since training runs for a fixed wall-clock budget, the resulting `val_bpb` reflects how much useful work your specific GPU can do in 5 minutes. Run the baseline on different hardware to compare effective throughput in a realistic training workload.
-
----
+Open `analysis.ipynb` to see the autoresearch progress chart -- validation accuracy climbing over experiments, with each kept improvement annotated.
 
 ## Architecture
 
 ```
- You (the human)
+ You (the researcher)
   |
   |  write research strategy
   v
- program.md ──────────────> AI Agent (Claude, Codex, etc.)
-                               |
-                               |  modify code, commit, run, evaluate
-                               v
-                            train.py ──> 5-min training run ──> val_bpb
-                               |                                  |
-                               |  if improved: keep commit        |
-                               |  if worse: git reset             |
-                               v                                  v
-                            results.tsv                    analysis.ipynb
-                            (experiment log)               (visualization)
+ program.md ──────────> AI Agent (Claude, Codex, etc.)
+                           |
+                           |  modify code, commit, run, evaluate
+                           v
+                        train.py ──> 5-min training ──> val_accuracy
+                           |                              |
+                           |  improved? ──> keep commit   |
+                           |  worse?    ──> git reset     |
+                           v                              v
+                        results.tsv                progress.png
+                        (experiment log)           (accuracy chart)
+                                                        |
+                                                        v
+                        app.py <── best_model.pt ── checkpoint
+                        (Gradio frontend)
 ```
 
-### The three files that matter
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed diagrams of the data pipeline, model architecture, evaluation pipeline, multi-step retrosynthesis inference, and AWS deployment.
+
+### File structure
 
 | File | Role | Who edits it |
 |------|------|-------------|
-| `prepare.py` | Fixed constants, data download, BPE tokenizer training, dataloader, evaluation (`evaluate_bpb`) | Nobody (read-only) |
-| `train.py` | GPT model, Muon+AdamW optimizer, training loop, all hyperparameters | The AI agent |
-| `program.md` | Research strategy, constraints, experiment loop protocol | You (the human) |
+| `prepare.py` | Data download (USPTO-50K), SMILES tokenizer, dataloader, evaluation function, building blocks extraction | Nobody (read-only) |
+| `train.py` | GPT model, optimizer (AdamW), training loop, all hyperparameters, checkpoint saving | The AI agent |
+| `program.md` | Agent instructions: experiment loop, keep/discard rules, metric, constraints | You (the researcher) |
+| `app.py` | Gradio frontend: single-step and multi-step retrosynthesis with molecule visualization | You (for UI changes) |
+| `analysis.ipynb` | Results visualization: progress chart, summary stats, top improvements | Run after experiments |
+| `terraform/` | AWS infrastructure: g4dn.xlarge GPU instance (~$0.53/hr) | You (for deployment) |
 
 ### What's inside train.py
 
-- **GPT model** -- transformer with RoPE, Flash Attention 3, multi-query attention, value embeddings (ResFormer-style), ReLU-squared activation, alternating sliding/full attention windows
-- **MuonAdamW optimizer** -- Muon (orthogonalization via Polar Express) for weight matrices, AdamW for everything else, with Nesterov momentum and cautious weight decay
-- **Training loop** -- gradient accumulation, time-based progress tracking, LR scheduling (linear warmup + cosine warmdown), fast-fail on NaN/divergence, `torch.compile`
+- **GPT model** -- decoder-only transformer with RoPE, RMS normalization, ReLU-squared activation, scaled dot-product attention (auto-dispatches to FlashAttention on supported hardware)
+- **Sequence format** -- `<bos> [product SMILES] <sep> [reactant SMILES] <eos>`, with loss computed only on reactant tokens
+- **Training loop** -- gradient accumulation, time-based progress tracking, LR scheduling (linear warmup + cosine warmdown), fast-fail on NaN/divergence
+- **Outputs** -- model checkpoints (`best_model.pt`), per-step loss curve (`loss_curve.csv`), summary metrics
 
-### Key design decisions
+## AWS Deployment
 
-- **Single file to modify.** Keeps scope manageable and diffs reviewable.
+Terraform config provisions a `g4dn.xlarge` (T4 16GB GPU, ~$0.53/hr) with the Deep Learning AMI:
+
+```bash
+cd terraform
+terraform init
+terraform apply -var="ssh_key_name=your-key"
+```
+
+The instance auto-bootstraps: clones the repo, installs dependencies, downloads data. SSH in and start the agent.
+
+| Duration | Cost | Experiments |
+|----------|------|-------------|
+| 1 hour | ~$0.53 | ~12 |
+| 6 hours | ~$3.18 | ~72 |
+| 12 hours | ~$6.36 | ~144 |
+
+See `terraform/` for full config including outputs for SSH command and Gradio URL.
+
+## Key Design Decisions
+
+These carry over from the original autoresearch framework and apply equally here:
+
+- **Single file to modify.** The agent only touches `train.py`. Keeps scope manageable and diffs reviewable.
 - **Fixed 5-minute time budget.** Makes every experiment directly comparable regardless of architecture/batch size changes. Also means autoresearch finds the best model *for your specific hardware*.
-- **Bits-per-byte metric.** Vocab-size-independent, so changing the tokenizer or vocabulary doesn't break comparisons.
 - **Self-contained.** One GPU, one file, one metric. No distributed training, no config files.
 
----
+Additions specific to retrosynthesis:
 
-## Project Ideas
+- **SMILES canonicalization from day 0.** All molecules are canonicalized via RDKit during data prep, evaluation, and inference. Multi-reactant SMILES fragments are sorted alphabetically. No ambiguity.
+- **Loss masking.** Only reactant tokens contribute to the loss -- the model attends to product tokens but isn't penalized for predicting them.
+- **Bits-per-byte replaced by top-1 accuracy.** The metric is exact-match accuracy after SMILES canonicalization on 500 validation reactions.
+- **Multi-step retrosynthesis at inference.** The model predicts one step; the frontend recursively applies it, stopping when reactants are commercially available (checked against building blocks extracted from training data).
 
-Here are some fun directions to take autoresearch:
+## Attribution
 
-### Multi-agent research swarm
-Run multiple agents on separate GPUs, each exploring a different research direction (one focused on architecture, another on optimization, a third on regularization). Have a coordinator agent merge the best findings across branches. You're now running your own AI research lab.
+This project is an unofficial fork/adaptation of [autoresearch](https://github.com/karpathy/autoresearch) by [Andrej Karpathy](https://github.com/karpathy). The original project introduced the concept of autonomous AI-driven ML experimentation -- an agent that modifies training code, runs experiments on a fixed time budget, and keeps or discards changes based on a validation metric. The original trains a small GPT on web text (ClimbMix-400B) and measures validation bits-per-byte.
 
-### Competitive leaderboard
-Set up a shared `results.tsv` across a group of friends or a class. Everyone runs autoresearch on their own hardware for 8 hours. Compare final `val_bpb` scores. Who wrote the best `program.md`? Whose agent found the most creative optimization?
+This adaptation preserves the core framework (the agent loop, keep/discard mechanism, fixed time budget, results logging, progress visualization) and applies it to a completely different domain -- chemical retrosynthesis prediction on USPTO-50K -- to demonstrate that the pattern generalizes beyond language model pretraining.
 
-### Research strategy meta-optimization
-The `program.md` is itself code -- just for agents instead of CPUs. Write a meta-agent that *modifies program.md*, measures how fast the inner agent improves `val_bpb` over N experiments, and iterates. Evolve the research strategy itself.
-
-### Scaling law explorer
-Modify the time budget and model size systematically. Sweep across DEPTH values (2, 4, 8, 16) and time budgets (1 min, 5 min, 15 min). Plot the Pareto frontier of compute vs. loss. Let the agent discover chinchilla-optimal configurations for your GPU.
-
-### Architecture search from scratch
-Strip `train.py` down to a bare skeleton (embedding + linear output) and see what the agent rebuilds from nothing. Does it rediscover attention? Multi-head attention? Layer normalization? RoPE? Document the evolutionary path.
-
-### Curriculum learning experiments
-Fork `prepare.py` to support multiple datasets (TinyStories, code, Wikipedia, math). Let the agent control dataset mixing ratios in `train.py` and discover optimal data curricula within the 5-minute window.
-
----
-
-## Platform Support
-
-This code requires a single NVIDIA GPU. For smaller hardware (MacBooks, consumer GPUs), see the forks below and consider these tuning recommendations:
-
-1. Use a lower-entropy dataset like [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean) for reasonable results with small models
-2. Decrease `vocab_size` (down to 4096, 2048, or even 256 for byte-level)
-3. Lower `MAX_SEQ_LEN` in `prepare.py` (down to 256) and increase `DEVICE_BATCH_SIZE` in `train.py` to compensate
-4. Decrease `EVAL_TOKENS` in `prepare.py` for faster validation
-5. Lower `DEPTH` (e.g. from 8 to 4) -- this is the primary complexity knob
-6. Use `WINDOW_PATTERN = "L"` (full attention) instead of `"SSSL"` (alternating banded)
-7. Lower `TOTAL_BATCH_SIZE` (e.g. to `2**14`)
-
-### Notable forks
-
-- [miolini/autoresearch-macos](https://github.com/miolini/autoresearch-macos) (macOS)
-- [trevin-creator/autoresearch-mlx](https://github.com/trevin-creator/autoresearch-mlx) (macOS)
-- [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx) (Windows)
-
----
-
-## Analyzing Results
-
-After a run, open `analysis.ipynb` to visualize experiment progress:
-
-```bash
-uv run jupyter lab analysis.ipynb
-```
-
-The notebook loads `results.tsv`, plots `val_bpb` over time with the running-best frontier highlighted, annotates kept experiments, and ranks improvements by delta. Useful for understanding which changes had the biggest impact.
-
-You can also inspect results from the command line:
-
-```bash
-# View all results
-cat results.tsv
-
-# Check latest run
-grep "^val_bpb:" run.log
-
-# Debug a crash
-tail -n 50 run.log
-```
-
----
-
-## Project Structure
-
-```
-prepare.py      -- constants, data prep + runtime utilities (do not modify)
-train.py        -- model, optimizer, training loop (agent modifies this)
-program.md      -- agent instructions (human modifies this)
-analysis.ipynb  -- results visualization
-results.tsv     -- experiment log (generated, not committed)
-pyproject.toml  -- dependencies
-```
+If you're interested in the original autoresearch for LLM pretraining, see:
+- Repository: [github.com/karpathy/autoresearch](https://github.com/karpathy/autoresearch)
+- Context: [Karpathy's tweet on autoresearch](https://x.com/karpathy/status/2029701092347630069)
+- Beginner guide: ["Dummy's Guide" to autoresearch](https://x.com/hooeem/status/2030720614752039185)
 
 ## License
 
