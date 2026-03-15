@@ -447,6 +447,10 @@ def evaluate_retro_accuracy(model, device):
     Evaluate retrosynthesis top-1 exact-match accuracy on validation set.
     Returns (accuracy, validity) as floats in [0, 1].
     """
+    # Suppress RDKit warnings during eval (model outputs lots of invalid SMILES)
+    from rdkit import RDLogger
+    RDLogger.logger().setLevel(RDLogger.CRITICAL)
+
     tokenizer = SMILESTokenizer.from_file()
     data = torch.load(os.path.join(DATA_DIR, "val_data.pt"), map_location="cpu", weights_only=True)
     sequences = data["sequences"]  # (N, MAX_SEQ_LEN)
@@ -456,7 +460,12 @@ def evaluate_retro_accuracy(model, device):
     valid_count = 0
 
     # Use autocast if on CUDA
-    ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16) if device.type == "cuda" else nullcontext()
+    if device.type == "cuda":
+        cap = torch.cuda.get_device_capability()
+        dtype = torch.bfloat16 if cap >= (8, 0) else torch.float16
+        ctx = torch.amp.autocast(device_type="cuda", dtype=dtype)
+    else:
+        ctx = nullcontext()
 
     with ctx:
         for i in range(n_eval):
