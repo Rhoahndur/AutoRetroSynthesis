@@ -72,12 +72,18 @@ resource "aws_instance" "gpu" {
   user_data = <<-EOF
     #!/bin/bash
     set -e
+    exec > /var/log/autoresearch-bootstrap.log 2>&1
+    echo "=== Bootstrap started at $(date) ==="
+
+    # Everything runs as ubuntu user to avoid permission issues
+    sudo -u ubuntu bash << 'SETUP'
+    set -e
     cd /home/ubuntu
 
     # Install uv
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    echo 'export PATH="/home/ubuntu/.local/bin:$PATH"' >> /home/ubuntu/.bashrc
-    export PATH="/home/ubuntu/.local/bin:$PATH"
+    export PATH="$HOME/.local/bin:$PATH"
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 
     # Clone repo
     git clone ${var.repo_url} autoresearch-retro
@@ -87,9 +93,10 @@ resource "aws_instance" "gpu" {
     uv sync
     uv run prepare.py
 
-    # Signal ready
     touch /home/ubuntu/READY
-    echo "Setup complete at $(date)" >> /home/ubuntu/setup.log
+    SETUP
+
+    echo "=== Bootstrap finished at $(date) ==="
   EOF
 
   tags = {
