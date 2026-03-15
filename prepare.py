@@ -21,6 +21,13 @@ from collections import Counter
 
 import torch
 
+# Suppress all RDKit C++ warnings globally (model generates lots of invalid SMILES)
+try:
+    from rdkit import RDLogger
+    RDLogger.DisableLog("rdApp.*")
+except ImportError:
+    pass
+
 # ---------------------------------------------------------------------------
 # Constants (fixed, do not modify)
 # ---------------------------------------------------------------------------
@@ -58,10 +65,10 @@ SPECIAL_TOKENS = ["<pad>", "<bos>", "<eos>", "<sep>"]
 # ---------------------------------------------------------------------------
 
 def _get_chem():
-    """Lazy import RDKit Chem module."""
+    """Lazy import RDKit Chem module with all warnings disabled."""
     from rdkit import Chem
     from rdkit import RDLogger
-    RDLogger.logger().setLevel(RDLogger.ERROR)
+    RDLogger.DisableLog("rdApp.*")
     return Chem
 
 def canonicalize_smiles(smiles):
