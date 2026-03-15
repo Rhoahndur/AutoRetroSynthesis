@@ -284,6 +284,15 @@ def get_lr_multiplier(progress):
 # Training loop
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Safety guardrails (hard limits the agent cannot override)
+# ---------------------------------------------------------------------------
+MAX_WALL_CLOCK = TIME_BUDGET * 2 + 120  # absolute wall-clock kill (2x budget + 2min startup)
+MAX_PARAMS = 200_000_000                 # 200M params max (prevent OOM)
+if num_params > MAX_PARAMS:
+    print(f"FAIL: model has {num_params/1e6:.1f}M params, exceeds {MAX_PARAMS/1e6:.0f}M limit")
+    exit(1)
+
 loss_log = []  # (step, loss) pairs for loss curve CSV
 t_start_training = time.time()
 smooth_train_loss = 0
@@ -315,9 +324,14 @@ while True:
 
     train_loss_f = train_loss.item()
 
-    # Fast fail
+    # Fast fail: loss diverged
     if math.isnan(train_loss_f) or train_loss_f > 100:
         print("\nFAIL: loss diverged")
+        exit(1)
+
+    # Hard wall-clock kill (agent cannot override this)
+    if time.time() - t_start > MAX_WALL_CLOCK:
+        print(f"\nFAIL: exceeded {MAX_WALL_CLOCK}s wall-clock limit")
         exit(1)
 
     if use_cuda:
