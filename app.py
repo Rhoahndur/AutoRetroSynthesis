@@ -309,7 +309,7 @@ def set_demo(name):
     return DEMOS.get(name, "")
 
 # Build interface
-with gr.Blocks(title="RetroSynth", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="RetroSynth") as demo:
     gr.Markdown("# RetroSynth: AI-Powered Retrosynthesis Prediction")
     gr.Markdown("Enter a molecule (SMILES or common name) to predict a synthesis route from commercial starting materials.")
 
