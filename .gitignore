@@ -1,0 +1,37 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# thought scratch docs
+PLAN.md
+
+# Virtual environments
+.venv
+worktrees/
+results/
+queue/
+
+# Agent prompt files (generated per-session by launchers)
+CLAUDE.md
+AGENTS.md
+
+# Experimental code/artifacts
+dev/
+
+# models
+best_model.pt
+latest_model.pt
+
+# Results file
+results.tsv
+loss_curve.csv
+
+# images
+progress.png
+
+uv.lock
+.python-version
