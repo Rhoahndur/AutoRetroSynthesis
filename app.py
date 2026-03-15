@@ -6,6 +6,7 @@ Usage: uv run app.py
 """
 
 import os
+os.environ.pop("MPLBACKEND", None)  # fix Colab matplotlib backend conflict with Gradio
 import pickle
 from io import BytesIO
 
@@ -40,7 +41,7 @@ def load_model():
         return _model, _tokenizer
 
     from prepare import SMILESTokenizer, DATA_DIR
-    from train import GPT, GPTConfig
+    from model import GPT, GPTConfig
 
     device = _get_device()
     _tokenizer = SMILESTokenizer.from_file()
