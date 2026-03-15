@@ -209,8 +209,14 @@ else:
 
 use_cuda = device.type == "cuda"
 use_compile = use_cuda  # only compile on CUDA
-use_autocast = use_cuda or device.type == "cpu"  # bf16 autocast
-autocast_dtype = torch.bfloat16
+use_autocast = use_cuda or device.type == "cpu"
+
+# T4 and older GPUs don't support bfloat16 -- use float16 instead
+if use_cuda:
+    capability = torch.cuda.get_device_capability()
+    autocast_dtype = torch.bfloat16 if capability >= (8, 0) else torch.float16
+else:
+    autocast_dtype = torch.bfloat16
 
 if use_autocast:
     autocast_ctx = torch.amp.autocast(device_type=device.type, dtype=autocast_dtype)
