@@ -350,13 +350,69 @@ step,loss,experiment_id
 Estimated cost: ~$0.55/hr ($3.30 for 6 hours)
 ```
 
+## Google Colab Deployment
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Google Colab (Free T4 GPU)                │
+│                                                             │
+│  colab.ipynb                                                │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Cell 1: !nvidia-smi (verify GPU)                   │    │
+│  │  Cell 2: Install uv                                 │    │
+│  │  Cell 3: git clone repo                             │    │
+│  │  Cell 4: uv sync                                    │    │
+│  │  Cell 5: uv run prepare.py (~2 min)                 │    │
+│  │  Cell 6: uv run train.py (~5 min)                   │    │
+│  │  Cell 7: Plot loss curve                            │    │
+│  │  Cell 8: uv run app.py (Gradio with share link)     │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                             │
+│  Limitations:                                               │
+│  ├── No SSH (free tier blocks it)                           │
+│  ├── Cannot run Claude Code autonomously                    │
+│  ├── Session disconnects after ~90 min idle                 │
+│  ├── Max 12 hour session                                    │
+│  └── Manual experiments only (no agent loop)                │
+│                                                             │
+│  Best for: quick testing, one-off experiments, demos        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Deployment Comparison
+
+| Feature | Local (MacBook) | Google Colab | AWS g4dn.xlarge |
+|---|---|---|---|
+| GPU | None (CPU/MPS) | T4 16GB (free) | T4 16GB ($0.53/hr) |
+| Training speed | ~35 steps/5min | ~8,400 steps/5min | ~8,400 steps/5min |
+| Agent loop | Manual only | Manual only | Autonomous (tmux + Claude Code) |
+| Session limits | None | 90min idle, 12hr max | None |
+| Cost | Free | Free | ~$0.53/hr |
+| Data persistence | Local disk | Lost on disconnect | EBS (persists across stop/start) |
+| Best for | Development, testing | Quick experiments, demos | Overnight autonomous runs |
+
 ## Device Compatibility
 
-| Component | MacBook Air M3 (local) | AWS g4dn.xlarge |
-|---|---|---|
-| Device | CPU (MPS possible but not needed) | CUDA (T4) |
-| prepare.py | Full (downloads data, builds tokenizer) | Full |
-| train.py | CPU mode, TIME_BUDGET=60 for testing | CUDA mode, TIME_BUDGET=300 |
-| Attention | F.scaled_dot_product_attention (CPU) | F.scaled_dot_product_attention (CUDA) |
-| torch.compile | Disabled on CPU/MPS | Enabled on CUDA |
-| app.py | CPU inference (fast for tiny model) | GPU inference |
+| Component | MacBook Air M3 (local) | Google Colab (T4) | AWS g4dn.xlarge (T4) |
+|---|---|---|---|
+| Device | CPU (MPS possible) | CUDA (T4) | CUDA (T4) |
+| prepare.py | Full | Full | Full |
+| train.py | CPU, TIME_BUDGET=60 | CUDA, TIME_BUDGET=300 | CUDA, TIME_BUDGET=300 |
+| Attention | SDPA (CPU) | SDPA (CUDA) | SDPA (CUDA) |
+| torch.compile | Disabled | Disabled (T4 compat) | Disabled (T4 compat) |
+| autocast | bfloat16 (CPU) | Disabled (CUBLAS issue) | Disabled (CUBLAS issue) |
+| app.py | CPU inference | GPU inference + share link | GPU inference + public IP |
+| Agent loop | N/A | N/A (no SSH) | Claude Code in tmux |
+
+## Known Compatibility Issues
+
+### T4 + PyTorch 2.10 + CUDA 12.8
+- `torch.compile` with `dynamic=False` crashes on T4 (not enough SMs)
+- `torch.amp.autocast` with float16 triggers CUBLAS_STATUS_INVALID_VALUE
+- **Workaround**: agent disabled both, trains in float32 (~2x slower)
+- **Fix**: use PyTorch 2.4-2.5 or switch to A10G/L4 instance (supports bfloat16)
+
+### Colab Nested Directory
+- `git clone` creates `AutoRetroSynthesis/AutoRetroSynthesis/` nesting
+- `colab.ipynb` auto-detects and `cd`s to correct directory
+- Caused by repo structure on GitHub
