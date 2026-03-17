@@ -12,11 +12,13 @@ import time
 from dataclasses import asdict
 
 import torch
-import torch.nn.functional as F
 
 from prepare import (
-    MAX_SEQ_LEN, TIME_BUDGET as _TIME_BUDGET, SMILESTokenizer,
-    make_dataloader, evaluate_retro_accuracy,
+    MAX_SEQ_LEN,
+    TIME_BUDGET as _TIME_BUDGET,
+    SMILESTokenizer,
+    make_dataloader,
+    evaluate_retro_accuracy,
 )
 from model import GPT, GPTConfig
 
@@ -28,23 +30,23 @@ TIME_BUDGET = int(os.environ.get("TIME_BUDGET", _TIME_BUDGET))
 # ---------------------------------------------------------------------------
 
 # Model architecture
-DEPTH = 4               # number of transformer layers
-N_EMBD = 256            # model embedding dimension
-N_HEAD = 4              # number of attention heads
+DEPTH = 4  # number of transformer layers
+N_EMBD = 256  # model embedding dimension
+N_HEAD = 4  # number of attention heads
 HEAD_DIM = N_EMBD // N_HEAD  # = 64
-DROPOUT = 0.1           # dropout rate (regularization)
+DROPOUT = 0.1  # dropout rate (regularization)
 
 # Optimization
 TOTAL_BATCH_SIZE = 2**14  # ~16K tokens per optimizer step
-LEARNING_RATE = 3e-4      # peak learning rate (AdamW)
-WEIGHT_DECAY = 0.1        # AdamW weight decay
+LEARNING_RATE = 3e-4  # peak learning rate (AdamW)
+WEIGHT_DECAY = 0.1  # AdamW weight decay
 ADAM_BETAS = (0.9, 0.95)  # Adam betas
-WARMUP_RATIO = 0.05       # fraction of time for LR warmup
-WARMDOWN_RATIO = 0.3      # fraction of time for LR cosine warmdown
-FINAL_LR_FRAC = 0.1       # final LR as fraction of peak
+WARMUP_RATIO = 0.05  # fraction of time for LR warmup
+WARMDOWN_RATIO = 0.3  # fraction of time for LR cosine warmdown
+FINAL_LR_FRAC = 0.1  # final LR as fraction of peak
 
 # Batch
-DEVICE_BATCH_SIZE = 64    # per-device batch size (reduce if OOM)
+DEVICE_BATCH_SIZE = 64  # per-device batch size (reduce if OOM)
 
 # ---------------------------------------------------------------------------
 # Device setup
@@ -76,10 +78,24 @@ if use_cuda:
 else:
     autocast_dtype = torch.bfloat16
 
+# Runtime autocast test: verify float16/bfloat16 actually works on this GPU+driver combo
+if use_autocast and use_cuda:
+    try:
+        with torch.amp.autocast(device_type="cuda", dtype=autocast_dtype):
+            _test = torch.randn(8, 8, device="cuda") @ torch.randn(8, 8, device="cuda")
+        del _test
+        print(f"Autocast: {autocast_dtype} verified working")
+    except RuntimeError as e:
+        print(
+            f"WARNING: {autocast_dtype} autocast failed ({e}), falling back to float32"
+        )
+        use_autocast = False
+
 if use_autocast:
     autocast_ctx = torch.amp.autocast(device_type=device.type, dtype=autocast_dtype)
 else:
     from contextlib import nullcontext
+
     autocast_ctx = nullcontext()
 
 # ---------------------------------------------------------------------------
@@ -129,6 +145,7 @@ print(f"Time budget: {TIME_BUDGET}s")
 print(f"Gradient accumulation: {grad_accum_steps}")
 print(f"Effective batch size: {grad_accum_steps * tokens_per_fwdbwd} tokens")
 
+
 # LR schedule
 def get_lr_multiplier(progress):
     if progress < WARMUP_RATIO:
@@ -139,6 +156,7 @@ def get_lr_multiplier(progress):
         cooldown = (1.0 - progress) / WARMDOWN_RATIO
         return cooldown + (1 - cooldown) * FINAL_LR_FRAC
 
+
 # ---------------------------------------------------------------------------
 # Training loop
 # ---------------------------------------------------------------------------
@@ -146,10 +164,14 @@ def get_lr_multiplier(progress):
 # ---------------------------------------------------------------------------
 # Safety guardrails (hard limits the agent cannot override)
 # ---------------------------------------------------------------------------
-MAX_WALL_CLOCK = TIME_BUDGET * 2 + 120  # absolute wall-clock kill (2x budget + 2min startup)
-MAX_PARAMS = 200_000_000                 # 200M params max (prevent OOM)
+MAX_WALL_CLOCK = (
+    TIME_BUDGET * 2 + 120
+)  # absolute wall-clock kill (2x budget + 2min startup)
+MAX_PARAMS = 200_000_000  # 200M params max (prevent OOM)
 if num_params > MAX_PARAMS:
-    print(f"FAIL: model has {num_params/1e6:.1f}M params, exceeds {MAX_PARAMS/1e6:.0f}M limit")
+    print(
+        f"FAIL: model has {num_params / 1e6:.1f}M params, exceeds {MAX_PARAMS / 1e6:.0f}M limit"
+    )
     exit(1)
 
 loss_log = []  # (step, loss) pairs for loss curve CSV
@@ -212,7 +234,11 @@ while True:
     remaining = max(0, TIME_BUDGET - total_training_time)
     tok_per_sec = int(TOTAL_BATCH_SIZE / dt) if dt > 0 else 0
 
-    print(f"\rstep {step:05d} ({pct:.1f}%) | loss: {debiased:.4f} | lr: {LEARNING_RATE * lrm:.2e} | dt: {dt*1000:.0f}ms | tok/s: {tok_per_sec:,} | epoch: {epoch} | remaining: {remaining:.0f}s    ", end="", flush=True)
+    print(
+        f"\rstep {step:05d} ({pct:.1f}%) | loss: {debiased:.4f} | lr: {LEARNING_RATE * lrm:.2e} | dt: {dt * 1000:.0f}ms | tok/s: {tok_per_sec:,} | epoch: {epoch} | remaining: {remaining:.0f}s    ",
+        end="",
+        flush=True,
+    )
 
     # GC management
     if step == 0:
