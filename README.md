@@ -4,20 +4,22 @@
 
 An AI agent autonomously experiments with model architecture, hyperparameters, and training strategies to improve a retrosynthesis prediction model -- predicting how to synthesize target molecules from available starting materials.
 
-Built on the [autoresearch](https://github.com/karpathy/autoresearch) framework by Andrej Karpathy, which introduced the idea of letting AI agents run ML experiments autonomously in a keep/discard loop. This project adapts that framework from language model pretraining to **chemical retrosynthesis prediction** on the [USPTO-50K](https://huggingface.co/datasets/pingzhili/uspto-50k) dataset, demonstrating that the autonomous experimentation pattern generalizes beyond text.
+Built on the [autoresearch](https://github.com/karpathy/autoresearch) framework by Andrej Karpathy, with improvements inspired by [auto-q-research](https://github.com/ottogin/auto-q-research) for structured experiment tracking, novelty-guided exploration, and multi-step investment strategies.
 
 ## How it works
 
 An AI coding agent (Claude, Codex, etc.) sits in a loop:
 
 ```
-1. Modify train.py (architecture, optimizer, hyperparameters, etc.)
-2. Train the model for 5 minutes
-3. Evaluate retrosynthesis accuracy on validation set
-4. If accuracy improved → keep the change
+1. Read analysis report (training dynamics, tried configs, novelty score)
+2. Formulate hypothesis (guided by exploration metrics, not just intuition)
+3. Modify train.py (architecture, optimizer, hyperparameters, etc.)
+4. Train the model for 5 minutes
+5. Run analyze.py (log results, check invest state, update reports)
+6. If accuracy improved → keep the change
+   If accuracy dropped but foundational → invest (with deadline)
    If accuracy didn't improve → revert
-5. Log results to results.tsv
-6. Repeat forever
+7. Repeat forever
 ```
 
 The model learns to predict **reactants from products**: given a target molecule as a SMILES string, generate the precursor molecules needed to synthesize it.
@@ -46,11 +48,20 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Install dependencies
 uv sync
 
-# Download USPTO-50K, build tokenizer, extract building blocks (~2 min)
+# Basic: download USPTO-50K, build tokenizer, extract building blocks (~2 min)
 uv run prepare.py
+
+# With SMILES augmentation (5x training data, recommended):
+uv run prepare.py --augment 5
+
+# With reaction class conditioning:
+uv run prepare.py --augment 5 --reaction-class
 
 # For local testing with a tiny subset (500 reactions):
 uv run prepare.py --tiny
+
+# Re-process data (e.g., after changing augmentation settings):
+uv run prepare.py --force --augment 5 --reaction-class
 ```
 
 ### 2. Run a single training experiment
@@ -85,7 +96,7 @@ Point your AI coding agent at the repo with permissions disabled:
 Hi, have a look at program.md and let's kick off a new experiment! Let's do the setup first.
 ```
 
-The agent creates a branch, establishes a baseline, then loops indefinitely -- modifying `train.py`, running experiments, keeping improvements, and logging everything to `results.tsv`.
+The agent creates a branch, establishes a baseline, then loops indefinitely -- modifying `train.py`, running experiments, analyzing results via `analyze.py`, keeping improvements (or investing in foundational changes), and logging everything.
 
 ### 4. Launch the frontend
 
@@ -93,55 +104,116 @@ The agent creates a branch, establishes a baseline, then loops indefinitely -- m
 uv run app.py
 ```
 
-Opens a Gradio web UI where you can input molecules (SMILES or common names like "aspirin") and see predicted retrosynthesis routes with 2D structure drawings.
+Opens a Gradio web UI at `http://localhost:7860` where you can:
+- Input molecules (SMILES or common names like "aspirin")
+- See predicted retrosynthesis routes with 2D structure drawings
+- Toggle beam search for top-3 predictions with confidence scores
+- View autoresearch experiment history and interactive accuracy charts
 
 ### 5. Visualize progress
 
-Open `analysis.ipynb` to see the autoresearch progress chart -- validation accuracy climbing over experiments, with each kept improvement annotated.
+Open `analysis.ipynb` to see the autoresearch progress chart, or use the **Autoresearch Progress** tab in the Gradio frontend for interactive Plotly charts.
 
 ## Architecture
 
 ```
  You (the researcher)
   |
-  |  write research strategy
+  |  write research strategy + prepare data
   v
  program.md ──────────> AI Agent (Claude, Codex, etc.)
                            |
-                           |  modify code, commit, run, evaluate
+                           |  1. read analysis.txt (training dynamics, novelty score)
+                           |  2. formulate hypothesis (guided by exploration metrics)
+                           |  3. modify train.py, commit
                            v
                         train.py ──> 5-min training ──> val_accuracy
                            |                              |
-                           |  improved? ──> keep commit   |
-                           |  worse?    ──> git reset     |
                            v                              v
-                        results.tsv                progress.png
-                        (experiment log)           (accuracy chart)
-                                                        |
-                                                        v
+                      analyze.py ←─────────────────── results
+                           |
+                           |  log to experiments.jsonl
+                           |  compute novelty score, training dynamics
+                           |  check invest state (deadlines, abort thresholds)
+                           |  generate fixed-size analysis.txt
+                           v
+                      analysis.txt ──> agent reads ──> next experiment
+                           |
                         app.py <── best_model.pt ── checkpoint
-                        (Gradio frontend)
+                        (Gradio frontend with beam search, Plotly charts)
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed diagrams of the data pipeline, model architecture, evaluation pipeline, multi-step retrosynthesis inference, and AWS deployment.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed diagrams.
 
 ### File structure
 
 | File | Role | Who edits it |
 |------|------|-------------|
-| `prepare.py` | Data download (USPTO-50K), SMILES tokenizer, dataloader, evaluation function, building blocks extraction | Nobody (read-only) |
-| `train.py` | GPT model, optimizer (AdamW), training loop, all hyperparameters, checkpoint saving | The AI agent |
-| `program.md` | Agent instructions: experiment loop, keep/discard rules, metric, constraints | You (the researcher) |
-| `app.py` | Gradio frontend: single-step and multi-step retrosynthesis with molecule visualization | You (for UI changes) |
-| `analysis.ipynb` | Results visualization: progress chart, summary stats, top improvements | Run after experiments |
-| `terraform/` | AWS infrastructure: g4dn.xlarge GPU instance (~$0.53/hr) | You (for deployment) |
+| `prepare.py` | Data download (USPTO-50K), SMILES tokenizer, dataloader, evaluation, beam search, SMILES augmentation, reaction class conditioning | Researcher (read-only for agent) |
+| `train.py` | GPT model instantiation, optimizer (AdamW), training loop, all hyperparameters, checkpoint saving | The AI agent |
+| `model.py` | GPT model definition (shared by train.py and app.py) | Researcher |
+| `program.md` | Agent instructions: experiment loop with analysis, invest mechanism, exploration guidance, literature search | Researcher |
+| `analyze.py` | Post-experiment analysis: logging, training dynamics, novelty scores, invest state management, fixed-size reports | Researcher (run by agent, not modified) |
+| `app.py` | Gradio frontend: retrosynthesis prediction with beam search, molecule visualization, experiment history, Plotly charts | Researcher |
+| `analysis.ipynb` | Results visualization: progress chart, summary stats | Run after experiments |
+| `terraform/` | AWS infrastructure: g4dn.xlarge GPU instance (~$0.53/hr) | Researcher |
+
+### Key files generated during experiments
+
+| File | Purpose | Who reads it |
+|------|---------|-------------|
+| `experiments.jsonl` | Append-only full experiment history with configs | Only `analyze.py` |
+| `analysis.txt` | Fixed-size report (~50 lines): dynamics, tried configs, novelty, invest state | Agent (every cycle) |
+| `ideas.md` | Prioritized experiment ideas (max 10, mechanically capped) | Agent |
+| `invest_state.json` | Invest mechanism state (active/inactive, deadline, thresholds) | Agent + `analyze.py` |
+| `results.tsv` | Legacy experiment log (6 columns) | Legacy support |
+| `best_model.pt` | Best model checkpoint | `app.py`, deployment |
+| `loss_curve.csv` | Per-step training loss for latest experiment | `analyze.py` |
 
 ### What's inside train.py
 
 - **GPT model** -- decoder-only transformer with RoPE, RMS normalization, ReLU-squared activation, scaled dot-product attention (auto-dispatches to FlashAttention on supported hardware)
 - **Sequence format** -- `<bos> [product SMILES] <sep> [reactant SMILES] <eos>`, with loss computed only on reactant tokens
 - **Training loop** -- gradient accumulation, time-based progress tracking, LR scheduling (linear warmup + cosine warmdown), fast-fail on NaN/divergence
+- **Runtime autocast test** -- verifies float16/bfloat16 works on the current GPU before training; falls back to float32 with a warning if CUBLAS errors occur
 - **Outputs** -- model checkpoints (`best_model.pt`), per-step loss curve (`loss_curve.csv`), summary metrics
+
+## Training Data & Augmentation
+
+### USPTO-50K
+- 49,015 reactions from US pharma patents
+- Split: ~40K train, ~5K val, ~5K test
+- 10 reaction type classes (heteroatom alkylation, acylation, C-C bond formation, etc.)
+
+### SMILES Augmentation
+The same molecule can be written as many valid SMILES strings. `prepare.py --augment N` generates N random SMILES variants per training reaction via RDKit, effectively multiplying training data with zero runtime overhead. This is a well-established technique that typically improves retrosynthesis accuracy by 5-15%.
+
+### Reaction Class Conditioning
+`prepare.py --reaction-class` extracts the 10 USPTO-50K reaction type labels and prepends class tokens (`<class_0>` through `<class_9>`) to each sequence. This gives the model a structural hint about what kind of reaction to predict.
+
+## Agent Loop Improvements
+
+### Structured Analysis (`analyze.py`)
+After each experiment, `analyze.py` produces a fixed-size `analysis.txt` report with:
+- Training dynamics (convergence detection, end-of-run slope, trend)
+- Tried-configurations summary (one line per hyperparameter, prevents retrying)
+- Config-space novelty score (deterministic L2 distance, flags low-diversity exploration)
+- Diminishing returns detection (flags tapped-out hyperparameter dimensions)
+- Invest mechanism state (deadline tracking, abort thresholds)
+
+### Invest Mechanism
+Beyond keep/discard, the agent can mark an experiment as **invest** when accuracy dropped but the change is believed to be foundational (e.g., SMILES augmentation needs follow-up model scaling). Invests have deadlines and abort thresholds, enforced mechanically by `analyze.py`.
+
+### Novelty-Guided Exploration
+Each experiment's config is projected into a normalized hyperparameter space, and its distance from all prior experiments is computed. Low novelty triggers a suggestion to explore a different direction, preventing the agent from making tiny variations in one corner of the search space.
+
+## Inference
+
+### Beam Search
+`prepare.py` includes both greedy and beam search generation. Beam search (width 10) explores multiple candidate predictions in parallel, typically adding +5-10% top-1 accuracy. The frontend supports toggling beam search for top-3 predictions with log-probability scores.
+
+### Multi-Step Retrosynthesis
+The model predicts one step; the frontend recursively applies it, stopping when reactants are commercially available (checked against building blocks extracted from training data) or when max depth is reached.
 
 ## Deployment Options
 
@@ -156,70 +228,38 @@ terraform apply -var="ssh_key_name=your-key"
 # SSH in, start Claude Code in tmux, let it run overnight
 ```
 
-| Duration | Cost | Experiments |
-|----------|------|-------------|
-| 1 hour | ~$0.53 | ~12 |
-| 6 hours | ~$3.18 | ~72 |
-| 12 hours | ~$6.36 | ~144 |
-
-Stop instance (pause billing, keep data): `aws ec2 stop-instances --instance-ids <id>`
-Start again: `aws ec2 start-instances --instance-ids <id>`
-Destroy everything: `cd terraform && terraform destroy -var="ssh_key_name=your-key"`
-
 ### Google Colab (free, for testing and demos)
 
-Open `colab.ipynb` in Colab, select T4 GPU runtime, run cells top to bottom. Free but limited: no autonomous agent (SSH blocked on free tier), sessions timeout after ~90 min idle.
+Open `colab.ipynb` in Colab, select T4 GPU runtime, run cells top to bottom. Free but limited: no autonomous agent, sessions timeout.
+
+### Hugging Face Spaces (free, for persistent demos)
+
+Deploy the Gradio frontend to HF Spaces for a permanent demo:
+1. Train on EC2 (agent loop)
+2. Copy `best_model.pt` locally
+3. Push repo + model to a HF Space
+4. Shut down EC2
 
 ### Local (MacBook, for development)
 
 ```bash
-uv run prepare.py --tiny    # 500 reactions for fast testing
-TIME_BUDGET=30 uv run train.py   # 30-second training run
-uv run app.py               # Frontend at localhost:7860
+uv run prepare.py --tiny
+TIME_BUDGET=30 uv run train.py
+uv run app.py
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed comparison of all three deployment options.
+## GPU Compatibility
 
-## Key Design Decisions
+The training script automatically detects GPU capability and selects the appropriate precision:
+- **Compute >= 8.0** (A10G, A100, L4): bfloat16
+- **Compute < 8.0** (T4): float16
+- **CUBLAS failure**: automatic fallback to float32 with warning
 
-These carry over from the original autoresearch framework and apply equally here:
-
-- **Single file to modify.** The agent only touches `train.py`. Keeps scope manageable and diffs reviewable.
-- **Fixed 5-minute time budget.** Makes every experiment directly comparable regardless of architecture/batch size changes. Also means autoresearch finds the best model *for your specific hardware*.
-- **Self-contained.** One GPU, one file, one metric. No distributed training, no config files.
-
-Additions specific to retrosynthesis:
-
-- **SMILES canonicalization from day 0.** All molecules are canonicalized via RDKit during data prep, evaluation, and inference. Multi-reactant SMILES fragments are sorted alphabetically. No ambiguity.
-- **Loss masking.** Only reactant tokens contribute to the loss -- the model attends to product tokens but isn't penalized for predicting them.
-- **Bits-per-byte replaced by top-1 accuracy.** The metric is exact-match accuracy after SMILES canonicalization on 500 validation reactions.
-- **Multi-step retrosynthesis at inference.** The model predicts one step; the frontend recursively applies it, stopping when reactants are commercially available (checked against building blocks extracted from training data).
-
-## Results
-
-After 12 autonomous experiments on a T4 GPU, the agent improved validation accuracy from 34.2% to 50.2%:
-
-```
-baseline:                34.2%
-+ higher LR (1e-3):     45.0%  (+10.8%)
-+ smaller batch (2^12): 45.8%  (+0.8%)
-+ label smoothing:      50.2%  (+4.4%)
-```
-
-The 4 demo molecules (aspirin, caffeine, ibuprofen, adipic acid) are **not in the training data** -- any successful prediction is genuine generalization from learned reaction patterns.
-
-See [HANDOFF.md](HANDOFF.md) for the full experiment log and next steps.
+PyTorch is pinned to 2.4-2.5 with CUDA 12.4 for maximum T4 compatibility.
 
 ## Attribution
 
-This project is an unofficial fork/adaptation of [autoresearch](https://github.com/karpathy/autoresearch) by [Andrej Karpathy](https://github.com/karpathy). The original project introduced the concept of autonomous AI-driven ML experimentation -- an agent that modifies training code, runs experiments on a fixed time budget, and keeps or discards changes based on a validation metric. The original trains a small GPT on web text (ClimbMix-400B) and measures validation bits-per-byte.
-
-This adaptation preserves the core framework (the agent loop, keep/discard mechanism, fixed time budget, results logging, progress visualization) and applies it to a completely different domain -- chemical retrosynthesis prediction on USPTO-50K -- to demonstrate that the pattern generalizes beyond language model pretraining.
-
-If you're interested in the original autoresearch for LLM pretraining, see:
-- Repository: [github.com/karpathy/autoresearch](https://github.com/karpathy/autoresearch)
-- Context: [Karpathy's tweet on autoresearch](https://x.com/karpathy/status/2029701092347630069)
-- Beginner guide: ["Dummy's Guide" to autoresearch](https://x.com/hooeem/status/2030720614752039185)
+This project is an unofficial fork/adaptation of [autoresearch](https://github.com/karpathy/autoresearch) by [Andrej Karpathy](https://github.com/karpathy). The agent loop improvements (structured analysis, novelty scores, invest mechanism) are inspired by [auto-q-research](https://github.com/ottogin/auto-q-research).
 
 ## License
 
