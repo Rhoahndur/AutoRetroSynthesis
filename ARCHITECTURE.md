@@ -10,15 +10,16 @@
 │  ┌──────────┐             ┌──────────┐       ┌──────────┐      │
 │  │prepare.py│             │ main.tf  │       │  app.py  │      │
 │  │ train.py │             │          │       │ (Gradio) │      │
-│  │program.md│             │ terraform│       │          │      │
-│  └────┬─────┘             │  apply   │       └────┬─────┘      │
-│       │ local test        └────┬─────┘            │ loads      │
-│       │ (CPU, tiny data)       │ provisions       │ best_model │
-│       v                        │                  │ .pt        │
-│  Verify pipeline               │                  v            │
-│  works end-to-end              │           Molecule input       │
-│                                │           → retrosynthesis     │
-│                                │             route display      │
+│  │analyze.py│             │ terraform│       │ + Plotly  │      │
+│  │program.md│             │  apply   │       │ + beam   │      │
+│  └────┬─────┘             └────┬─────┘       └────┬─────┘      │
+│       │ local test              │ provisions       │ loads      │
+│       │ (CPU, tiny data)        │                  │ best_model │
+│       v                         │                  │ .pt        │
+│  Verify pipeline                │                  v            │
+│  works end-to-end               │           Molecule input       │
+│                                 │           → retrosynthesis     │
+│                                 │             route display      │
 └────────────────────────────────┼────────────────────────────────┘
                                  │
                     SSH / SCP    │
@@ -27,35 +28,55 @@
 │                    AWS g4dn.xlarge (T4 16GB)                    │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │                  AUTORESEARCH AGENT LOOP                 │    │
+│  │              AUTORESEARCH AGENT LOOP (enhanced)          │    │
 │  │                                                         │    │
-│  │  ┌──────────┐    ┌──────────┐    ┌──────────┐          │    │
-│  │  │  Modify  │───>│  Train   │───>│ Evaluate │          │    │
-│  │  │ train.py │    │  5 min   │    │ accuracy │          │    │
-│  │  └──────────┘    └──────────┘    └─────┬────┘          │    │
-│  │       ^                                │               │    │
-│  │       │          ┌─────────────────────┤               │    │
-│  │       │          │                     │               │    │
-│  │       │    improved?              not improved?         │    │
-│  │       │          │                     │               │    │
-│  │       │          v                     v               │    │
-│  │       │    ┌──────────┐         ┌──────────┐           │    │
-│  │       │    │   KEEP   │         │ DISCARD  │           │    │
-│  │       │    │  commit  │         │git reset │           │    │
-│  │       │    └──────────┘         └──────────┘           │    │
-│  │       │          │                     │               │    │
-│  │       │          v                     │               │    │
-│  │       │    ┌──────────┐                │               │    │
-│  │       │    │   Log    │<───────────────┘               │    │
-│  │       └────┤results.tsv                                │    │
-│  │            └──────────┘                                │    │
+│  │  ┌──────────┐   ┌──────────┐   ┌──────────┐            │    │
+│  │  │  Read    │──>│Formulate │──>│  Modify  │            │    │
+│  │  │analysis  │   │hypothesis│   │ train.py │            │    │
+│  │  │.txt      │   │(novelty- │   └────┬─────┘            │    │
+│  │  │+ ideas   │   │ guided)  │        │                  │    │
+│  │  └──────────┘   └──────────┘        v                  │    │
+│  │       ^                        ┌──────────┐            │    │
+│  │       │                        │  Train   │            │    │
+│  │       │                        │  5 min   │            │    │
+│  │       │                        └────┬─────┘            │    │
+│  │       │                             │                  │    │
+│  │       │                        ┌────▼─────┐            │    │
+│  │       │                        │ Evaluate │            │    │
+│  │       │                        │ accuracy │            │    │
+│  │       │                        └────┬─────┘            │    │
+│  │       │                             │                  │    │
+│  │       │                        ┌────▼─────┐            │    │
+│  │       │                        │analyze.py│            │    │
+│  │       │                        │ - log    │            │    │
+│  │       │                        │ - invest │            │    │
+│  │       │                        │ - report │            │    │
+│  │       │                        └────┬─────┘            │    │
+│  │       │                             │                  │    │
+│  │       │          ┌──────────────────┤                  │    │
+│  │       │          │          │       │                  │    │
+│  │       │     improved?   foundational?  not improved?   │    │
+│  │       │          │          │       │                  │    │
+│  │       │          v          v       v                  │    │
+│  │       │    ┌────────┐ ┌────────┐ ┌────────┐           │    │
+│  │       │    │  KEEP  │ │ INVEST │ │DISCARD │           │    │
+│  │       │    │ commit │ │deadline│ │git rset│           │    │
+│  │       │    └────────┘ └────────┘ └────────┘           │    │
+│  │       │          │          │       │                  │    │
+│  │       │          v          v       v                  │    │
+│  │       │    ┌──────────────────────────────┐            │    │
+│  │       └────┤  Update ideas.md, repeat     │            │    │
+│  │            └──────────────────────────────┘            │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
 │  Outputs:                                                       │
-│  ├── results.tsv          (experiment log)                      │
+│  ├── experiments.jsonl    (full history, append-only)            │
+│  ├── analysis.txt         (fixed-size report for agent)         │
+│  ├── invest_state.json    (invest mechanism state)              │
+│  ├── ideas.md             (max 10 items, mechanically capped)   │
 │  ├── best_model.pt        (best checkpoint)                     │
 │  ├── loss_curve.csv       (per-experiment training curves)      │
-│  └── progress.png         (autoresearch progress chart)         │
+│  └── results.tsv          (legacy experiment log)               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -75,20 +96,29 @@ USPTO-50K (HuggingFace)
 │  2. Canonicalize all SMILES (RDKit)                      │
 │     └── Sort multi-reactant fragments alphabetically     │
 │                                                          │
-│  3. Build SMILES tokenizer (character-level, regex)      │
-│     └── ~80-90 token vocab                               │
+│  3. Extract reaction class labels (--reaction-class)     │
+│     └── 10 classes: alkylation, acylation, C-C bond, ..  │
+│                                                          │
+│  4. Build SMILES tokenizer (character-level, regex)      │
+│     └── ~90 SMILES token vocab                           │
 │     └── Special tokens: <pad>=0, <bos>=1, <eos>=2,      │
-│                          <sep>=3                         │
+│         <sep>=3, <class_0>=4, ..., <class_9>=13          │
 │                                                          │
-│  4. Tokenize all reactions                               │
-│     └── <bos> [product] <sep> [reactants] <eos> <pad>   │
+│  5. SMILES Augmentation (--augment N, training only)     │
+│     └── Generate N random SMILES per reaction via RDKit  │
+│     └── Randomize fragment order for reactants           │
+│     └── Multiplies training data by (1+N)x               │
 │                                                          │
-│  5. Save as tensors                                      │
-│     └── train.pt (40K), val.pt (5K), test.pt (5K)       │
-│     └── vocab.json (token <-> id mappings)               │
+│  6. Tokenize all reactions                               │
+│     └── <bos> [<class_N>] [product] <sep> [react] <eos>  │
 │                                                          │
-│  6. Download ZINC building blocks                        │
-│     └── Canonical SMILES set for buyability lookup       │
+│  7. Save as tensors                                      │
+│     └── train.pt, val.pt, test.pt                        │
+│     └── vocab.json, raw_reactions.json                   │
+│                                                          │
+│  8. Extract building blocks                              │
+│     └── Reactants appearing in >= 3 reactions            │
+│     └── + common lab reagents                            │
 │     └── building_blocks.pkl                              │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -99,23 +129,24 @@ USPTO-50K (HuggingFace)
 ┌──────────────────────────────────────────────────────────┐
 │                    GPT (Decoder-Only)                     │
 │                                                          │
-│  Input: <bos> C C ( = O ) O c 1 ... <sep>               │
+│  Input: <bos> <class_2> C C ( = O ) O c 1 ... <sep>     │
 │                                                          │
 │  ┌──────────────────────────────────┐                    │
-│  │  Token Embedding (vocab=~90)     │                    │
+│  │  Token Embedding (vocab=~90+14) │                    │
 │  │  + Rotary Position Embedding     │                    │
 │  └──────────────┬───────────────────┘                    │
 │                 │                                        │
 │  ┌──────────────▼───────────────────┐                    │
 │  │  Transformer Block x4            │                    │
 │  │  ┌─────────────────────────┐     │                    │
-│  │  │ RMSNorm                 │     │                    │
-│  │  │ Causal Self-Attention   │     │  n_embd = 256      │
-│  │  │ (SDPA, n_head=4)       │     │  head_dim = 64     │
-│  │  │ + Value Embedding       │     │  ~2-5M params      │
+│  │  │ RMSNorm                 │     │  n_embd = 256      │
+│  │  │ Causal Self-Attention   │     │  head_dim = 64     │
+│  │  │ (SDPA, n_head=4)       │     │  ~2-5M params      │
+│  │  │ + Dropout               │     │                    │
 │  │  ├─────────────────────────┤     │                    │
 │  │  │ RMSNorm                 │     │                    │
 │  │  │ MLP (ReLU²)            │     │                    │
+│  │  │ + Dropout               │     │                    │
 │  │  └─────────────────────────┘     │                    │
 │  └──────────────┬───────────────────┘                    │
 │                 │                                        │
@@ -126,31 +157,39 @@ USPTO-50K (HuggingFace)
 │  Output: O c 1 c c c c c 1 C ( = O ) O <eos>            │
 │                                                          │
 │  Loss: cross-entropy on reactant tokens only             │
-│  (product tokens masked, <pad> tokens masked)            │
+│  (product, class, and <pad> tokens masked)               │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ## Training Sequence Format
 
 ```
-Position:  0    1  2  3  4  5  6  7  8  9  10 11 12 13  14 15 ...
-Token:    <bos> C  C  (  =  O  )  O  c  1  c  c  c  c  <sep> O ...
-Loss mask: 0    0  0  0  0  0  0  0  0  0  0  0  0  0   0    1 ...
-           |<-- product (no loss) -->|                   |<-- reactants (loss) -->|
+Without reaction class:
+Position:  0    1  2  3  4  5  6  7  8  9  10  11 12 13 14 ...
+Token:    <bos> C  C  (  =  O  )  O  c  1  c   c  c  c  <sep> O ...
+Loss mask: 0    0  0  0  0  0  0  0  0  0  0   0  0  0   0    1 ...
+           |<-- product (no loss) -->|                    |<-- reactants (loss) -->|
+
+With reaction class:
+Position:  0     1        2  3  4  5  6  7  8  ...  <sep> O ...
+Token:    <bos> <class_2> C  C  (  =  O  )  O  ...  <sep> O ...
+Loss mask: 0     0        0  0  0  0  0  0  0  ...   0    1 ...
+           |<-- class + product (no loss) -->|       |<-- reactants (loss) -->|
 ```
 
 ## Evaluation Pipeline
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                  evaluate_retro_accuracy()                │
+│              evaluate_retro_accuracy()                    │
 │                                                          │
-│  For 500 val examples (batched, batch_size=64):          │
+│  For 500 val examples:                                   │
 │                                                          │
-│  1. Feed prefix: <bos> [product tokens] <sep>            │
+│  1. Feed prefix: <bos> [class] [product tokens] <sep>    │
 │                                                          │
-│  2. Greedy autoregressive generation                     │
-│     └── argmax next token until <eos> or max_len         │
+│  2. Generation (configurable):                           │
+│     ├── Greedy: argmax next token until <eos>            │
+│     └── Beam search (width=10): explore top-K candidates │
 │                                                          │
 │  3. Decode generated tokens → SMILES string              │
 │                                                          │
@@ -163,11 +202,87 @@ Loss mask: 0    0  0  0  0  0  0  0  0  0  0  0  0  0   0    1 ...
 │  5. Compare to ground truth (also canonicalized)         │
 │     └── Exact string match                               │
 │                                                          │
-│  Metrics:                                                │
-│  ├── val_accuracy = correct / total                      │
-│  ├── val_validity = valid_smiles / total                 │
-│  └── (secondary) partial_match = fraction of reactants   │
-│       individually correct                               │
+│  Metrics (greedy mode):                                  │
+│  ├── val_accuracy = correct / total (top-1)              │
+│  └── val_validity = valid_smiles / total                 │
+│                                                          │
+│  Metrics (beam mode):                                    │
+│  ├── top-1 accuracy                                      │
+│  ├── top-3 accuracy                                      │
+│  ├── top-5 accuracy                                      │
+│  ├── top-10 accuracy                                     │
+│  └── val_validity                                        │
+└──────────────────────────────────────────────────────────┘
+```
+
+## Post-Experiment Analysis Pipeline
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                      analyze.py                           │
+│                                                          │
+│  Input: --commit, --accuracy, --status, --config (JSON)  │
+│                                                          │
+│  1. Log experiment to experiments.jsonl (append-only)     │
+│                                                          │
+│  2. Update invest state:                                 │
+│     ├── Decrement deadline                               │
+│     ├── Check success (accuracy > best_before_invest)    │
+│     ├── Check abort (accuracy < 70% of best)             │
+│     └── Check deadline expiry                            │
+│                                                          │
+│  3. Enforce ideas.md size (truncate to 10 items)         │
+│                                                          │
+│  4. Generate analysis.txt (fixed-size, ~50 lines):       │
+│     ├── Current run results                              │
+│     ├── Training dynamics (trend, convergence, slope)    │
+│     ├── Best experiment + rank                           │
+│     ├── Last 10 experiments table                        │
+│     ├── Tried configurations (1 line per dimension)      │
+│     ├── Novelty score (L2 in normalized config space)    │
+│     ├── Diminishing returns warnings                     │
+│     └── Invest state summary                             │
+│                                                          │
+│  Config space dimensions (for novelty score):            │
+│  ├── DEPTH        [1, 12]      linear                    │
+│  ├── N_EMBD       [64, 512]    linear                    │
+│  ├── LR           [1e-5, 1e-2] log                      │
+│  ├── BATCH_SIZE   [2^8, 2^18]  log                      │
+│  ├── DROPOUT      [0, 0.5]     linear                   │
+│  ├── WEIGHT_DECAY [0, 0.5]     linear                   │
+│  ├── LABEL_SMOOTH [0, 0.3]     linear                   │
+│  └── WARMUP_RATIO [0, 0.2]     linear                   │
+└──────────────────────────────────────────────────────────┘
+```
+
+## Invest Mechanism
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   Invest State Machine                    │
+│                                                          │
+│  ┌─────────┐   accuracy dropped    ┌──────────────────┐ │
+│  │  NORMAL ├──but foundational──> │ INVEST ACTIVE     │ │
+│  │  (keep/ │   agent creates      │ deadline: 3       │ │
+│  │ discard)│   invest_state.json  │ abort: 70% best   │ │
+│  └────┬────┘                      └──────┬───────────┘ │
+│       ^                                  │             │
+│       │                    ┌─────────────┼──────────┐  │
+│       │                    │             │          │  │
+│       │              accuracy >     accuracy <   deadline │
+│       │              best_before    threshold    expired │
+│       │                    │             │          │  │
+│       │                    v             v          v  │
+│       │              ┌─────────┐ ┌──────────┐ ┌──────┐│
+│       └──────────────┤ SUCCESS │ │  ABORT   │ │EXPIRE││
+│                      │ → keep  │ │ → revert │ │→rvrt ││
+│                      └─────────┘ └──────────┘ └──────┘│
+│                                                        │
+│  Rules:                                                │
+│  - Max 1 active invest at a time                       │
+│  - Default deadline: 3 experiments                     │
+│  - Abort threshold: 70% of best accuracy               │
+│  - analyze.py enforces all deadlines mechanically       │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -179,6 +294,7 @@ retro_tree(target="caffeine", max_depth=5)
 │  ┌────────────────────────────────────┐
 │  │ model.predict("caffeine SMILES")   │
 │  │ → reactant_A + reactant_B          │
+│  │ (greedy or beam search)             │
 │  └─────────┬──────────────┬───────────┘
 │            │              │
 │       ┌────▼────┐    ┌───▼────┐
@@ -196,38 +312,13 @@ retro_tree(target="caffeine", max_depth=5)
 │         ...recurse...   ...recurse...
 │
 │  Termination conditions:
-│  ├── Molecule is in ZINC building blocks set → BUYABLE
-│  ├── max_depth reached → STOP (mark as "needs further synthesis")
+│  ├── Molecule is in building blocks set → BUYABLE
+│  ├── max_depth reached → STOP
 │  ├── Cycle detected (same mol in ancestor path) → STOP
-│  └── Invalid SMILES generated → STOP (mark as "prediction failed")
+│  └── Invalid SMILES generated → STOP
 │
 │  Output: tree structure with molecules at each node,
 │          buyability status at leaves, RDKit 2D drawings
-```
-
-### ZINC Building Blocks Lookup
-
-```
-┌──────────────────────────────────────────────────────────┐
-│              Commercially Available Check                 │
-│                                                          │
-│  Source: ZINC database building block catalogs            │
-│  ├── Sigma-Aldrich Building Blocks                       │
-│  ├── Enamine Building Blocks                             │
-│  └── Combi-Blocks                                        │
-│                                                          │
-│  Implementation:                                         │
-│  1. Download SMILES lists from ZINC catalogs             │
-│  2. Canonicalize all SMILES via RDKit                    │
-│  3. Store as a Python set() for O(1) lookup              │
-│  4. Serialize to building_blocks.pkl                     │
-│                                                          │
-│  At inference time:                                      │
-│  is_buyable(smiles) = canonical(smiles) in building_set  │
-│                                                          │
-│  Fallback (if ZINC download unavailable):                │
-│  is_buyable(smiles) = mol_weight < 200 and num_rings < 3 │
-└──────────────────────────────────────────────────────────┘
 ```
 
 ## Frontend (Gradio)
@@ -235,92 +326,50 @@ retro_tree(target="caffeine", max_depth=5)
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  RetroSynth: AI-Powered Retrosynthesis Prediction           │
-├─────────────────────────────────────────────────────────────┤
+│  Model accuracy: 50.2% | 4 layers, 256 dim | Updated: ...  │
+├────────────────────────── Tab: Predict ─────────────────────┤
 │                                                             │
 │  ┌─────────────────────────────────────────────────┐        │
 │  │  Enter SMILES or molecule name:                  │        │
 │  │  [                                            ]  │        │
+│  │  Max depth: [===3===]  ☐ Use beam search (top-3) │        │
 │  │  [Predict Route]                                 │        │
 │  └─────────────────────────────────────────────────┘        │
 │                                                             │
 │  Demo molecules:                                            │
 │  [Aspirin] [Caffeine] [Ibuprofen] [Adipic Acid]            │
 │                                                             │
-├─────────────────────────────────────────────────────────────┤
+│  ┌─────────┐           ┌─────────┐                          │
+│  │  [img]  │  Target   │  [img]  │  Predicted reactants     │
+│  └─────────┘           └─────────┘                          │
 │                                                             │
-│  Target: Caffeine                                           │
-│  ┌─────────┐                                                │
-│  │  [img]  │  Cn1c(=O)c2c(ncn2C)n(C)c1=O                  │
-│  └─────────┘                                                │
-│       │                                                     │
-│       ▼                                                     │
-│  Step 1: Methylation                                        │
-│  ┌─────────┐     ┌─────────┐                                │
-│  │  [img]  │  +  │  [img]  │                                │
-│  │ react A │     │ react B │                                │
-│  └────┬────┘     └─────────┘                                │
-│       │           [BUYABLE]                                 │
-│       ▼                                                     │
-│  Step 2: ...                                                │
-│  ┌─────────┐     ┌─────────┐                                │
-│  │  [img]  │  +  │  [img]  │                                │
-│  └─────────┘     └─────────┘                                │
-│  [BUYABLE]       [BUYABLE]                                  │
+│  Top Predictions (beam search):                             │
+│  1. OC(=O)c1ccccc1O.CC(=O)OC(=O)C  (log-prob: -2.31)      │
+│  2. OC(=O)c1ccccc1O.CC(=O)Cl       (log-prob: -3.45)      │
+│  3. OC(=O)c1ccccc1O.CC(=O)O        (log-prob: -4.12)      │
 │                                                             │
-│  Route complete in 2 steps from commercial materials.       │
+│  Synthesis Route (2 steps):                                 │
+│  Step 1: salicylic acid + acetic anhydride --> aspirin      │
 │                                                             │
-├─────────────────────────────────────────────────────────────┤
-│  Autoresearch Progress                                      │
+├────────────── Tab: Autoresearch Progress ───────────────────┤
+│                                                             │
 │  ┌─────────────────────────────────────────────────┐        │
-│  │ val_accuracy chart (embedded progress.png)       │        │
+│  │  Interactive Plotly chart: accuracy over expts   │        │
+│  │  Green dots = kept, gray = discarded,            │        │
+│  │  amber = invested, green line = running best     │        │
 │  └─────────────────────────────────────────────────┘        │
 │                                                             │
-│  Model: 36 experiments, best accuracy: 31.2%                │
-│  Training loss curves: [Show/Hide]                          │
+│  | # | Commit  | Accuracy | Validity | Status | Desc   |   │
+│  |---|---------|----------|----------|--------|--------|   │
+│  | 1 | c095a7f | 0.3420   | 0.7520   | kept   | base.. |   │
+│  | 2 | 33cd4fb | 0.4500   | 0.8720   | kept   | LR=..  |   │
+│  | ...                                                  |   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────┐        │
+│  │  Latest training loss curve (Plotly)              │        │
+│  └─────────────────────────────────────────────────┘        │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-## Results Logging
-
-### results.tsv (per experiment)
-```
-commit    val_accuracy    val_validity    memory_gb    status    description
-a1b2c3d   0.120000        0.850000        2.1          keep      baseline
-b2c3d4e   0.185000        0.890000        2.1          keep      increase LR to 0.04
-c3d4e5f   0.105000        0.820000        2.1          discard   switch to GeLU
-d4e5f6g   0.000000        0.000000        0.0          crash     double depth (OOM)
-```
-
-### loss_curve.csv (per experiment, overwritten each run)
-```
-step,loss,experiment_id
-0,4.512,b2c3d4e
-10,3.891,b2c3d4e
-20,3.214,b2c3d4e
-...
-```
-
-## Visualizations (3 charts)
-
-### Chart 1: Autoresearch Progress (across experiments)
-- X: experiment number
-- Y: val_accuracy (higher is better)
-- Green dots: kept improvements
-- Gray dots: discarded attempts
-- Green staircase: running best (cummax)
-- **Story: "The agent autonomously improved retrosynthesis accuracy over N experiments"**
-
-### Chart 2: Training Loss Curves (within experiments)
-- X: training step
-- Y: cross-entropy loss
-- Multiple overlaid curves (one per experiment, color-coded)
-- **Story: "Different training configurations produce different learning dynamics"**
-
-### Chart 3: Retrosynthesis Route (frontend)
-- Tree of molecules with 2D structure drawings
-- Arrows showing synthetic direction
-- Buyability labels on leaves
-- **Story: "Here's what the model can actually do"**
 
 ## AWS Infrastructure (Terraform)
 
@@ -340,79 +389,35 @@ step,loss,experiment_id
 │  │  │  │  CPU: 4 vCPU, 16GB RAM     │ │  │ │
 │  │  │  │  Disk: 100GB gp3           │ │  │ │
 │  │  │  │  Elastic IP attached       │ │  │ │
+│  │  │  │  PyTorch 2.4-2.5 + CUDA124 │ │  │ │
 │  │  │  └────────────────────────────┘ │  │ │
 │  │  └─────────────────────────────────┘  │ │
 │  └───────────────────────────────────────┘ │
 │                                            │
 │  Internet Gateway                          │
 └────────────────────────────────────────────┘
-
-Estimated cost: ~$0.55/hr ($3.30 for 6 hours)
-```
-
-## Google Colab Deployment
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Google Colab (Free T4 GPU)                │
-│                                                             │
-│  colab.ipynb                                                │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  Cell 1: !nvidia-smi (verify GPU)                   │    │
-│  │  Cell 2: Install uv                                 │    │
-│  │  Cell 3: git clone repo                             │    │
-│  │  Cell 4: uv sync                                    │    │
-│  │  Cell 5: uv run prepare.py (~2 min)                 │    │
-│  │  Cell 6: uv run train.py (~5 min)                   │    │
-│  │  Cell 7: Plot loss curve                            │    │
-│  │  Cell 8: uv run app.py (Gradio with share link)     │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                             │
-│  Limitations:                                               │
-│  ├── No SSH (free tier blocks it)                           │
-│  ├── Cannot run Claude Code autonomously                    │
-│  ├── Session disconnects after ~90 min idle                 │
-│  ├── Max 12 hour session                                    │
-│  └── Manual experiments only (no agent loop)                │
-│                                                             │
-│  Best for: quick testing, one-off experiments, demos        │
-└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Deployment Comparison
 
-| Feature | Local (MacBook) | Google Colab | AWS g4dn.xlarge |
-|---|---|---|---|
-| GPU | None (CPU/MPS) | T4 16GB (free) | T4 16GB ($0.53/hr) |
-| Training speed | ~35 steps/5min | ~8,400 steps/5min | ~8,400 steps/5min |
-| Agent loop | Manual only | Manual only | Autonomous (tmux + Claude Code) |
-| Session limits | None | 90min idle, 12hr max | None |
-| Cost | Free | Free | ~$0.53/hr |
-| Data persistence | Local disk | Lost on disconnect | EBS (persists across stop/start) |
-| Best for | Development, testing | Quick experiments, demos | Overnight autonomous runs |
+| Feature | Local (MacBook) | Google Colab | AWS g4dn.xlarge | HF Spaces |
+|---|---|---|---|---|
+| GPU | None (CPU/MPS) | T4 16GB (free) | T4 16GB ($0.53/hr) | CPU (free) or GPU ($) |
+| Training speed | ~35 steps/5min | ~8,400 steps/5min | ~8,400 steps/5min | N/A (inference only) |
+| Agent loop | Manual only | Manual only | Autonomous (tmux) | N/A |
+| Session limits | None | 90min idle, 12hr max | None | None |
+| Cost | Free | Free | ~$0.53/hr | Free (CPU tier) |
+| Best for | Development | Quick experiments | Overnight runs | Persistent demo |
 
 ## Device Compatibility
 
-| Component | MacBook Air M3 (local) | Google Colab (T4) | AWS g4dn.xlarge (T4) |
+| Component | MacBook (local) | Colab (T4) | AWS g4dn (T4) |
 |---|---|---|---|
 | Device | CPU (MPS possible) | CUDA (T4) | CUDA (T4) |
 | prepare.py | Full | Full | Full |
 | train.py | CPU, TIME_BUDGET=60 | CUDA, TIME_BUDGET=300 | CUDA, TIME_BUDGET=300 |
-| Attention | SDPA (CPU) | SDPA (CUDA) | SDPA (CUDA) |
+| Autocast | bfloat16 (CPU) | float16 (tested at runtime) | float16 (tested at runtime) |
 | torch.compile | Disabled | Disabled (T4 compat) | Disabled (T4 compat) |
-| autocast | bfloat16 (CPU) | Disabled (CUBLAS issue) | Disabled (CUBLAS issue) |
-| app.py | CPU inference | GPU inference + share link | GPU inference + public IP |
+| Beam search | CPU inference | GPU inference | GPU inference |
+| app.py | CPU inference | GPU + share link | GPU + public IP |
 | Agent loop | N/A | N/A (no SSH) | Claude Code in tmux |
-
-## Known Compatibility Issues
-
-### T4 + PyTorch 2.10 + CUDA 12.8
-- `torch.compile` with `dynamic=False` crashes on T4 (not enough SMs)
-- `torch.amp.autocast` with float16 triggers CUBLAS_STATUS_INVALID_VALUE
-- **Workaround**: agent disabled both, trains in float32 (~2x slower)
-- **Fix**: use PyTorch 2.4-2.5 or switch to A10G/L4 instance (supports bfloat16)
-
-### Colab Nested Directory
-- `git clone` creates `AutoRetroSynthesis/AutoRetroSynthesis/` nesting
-- `colab.ipynb` auto-detects and `cd`s to correct directory
-- Caused by repo structure on GitHub
