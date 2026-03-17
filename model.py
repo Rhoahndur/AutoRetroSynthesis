@@ -88,18 +88,24 @@ class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.transformer = nn.ModuleDict({
-            "wte": nn.Embedding(config.vocab_size, config.n_embd),
-            "h": nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-        })
+        self.transformer = nn.ModuleDict(
+            {
+                "wte": nn.Embedding(config.vocab_size, config.n_embd),
+                "h": nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            }
+        )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
-        cos, sin = self._precompute_rotary(config.sequence_len, config.n_embd // config.n_head)
+        cos, sin = self._precompute_rotary(
+            config.sequence_len, config.n_embd // config.n_head
+        )
         self.register_buffer("cos", cos, persistent=False)
         self.register_buffer("sin", sin, persistent=False)
 
     def _precompute_rotary(self, seq_len, head_dim, base=10000):
-        inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim))
+        inv_freq = 1.0 / (
+            base ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+        )
         t = torch.arange(seq_len, dtype=torch.float32)
         freqs = torch.outer(t, inv_freq)
         cos = freqs.cos()[None, None, :, :]
