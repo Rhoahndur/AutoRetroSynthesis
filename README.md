@@ -143,17 +143,18 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed diagrams of the data pipelin
 - **Training loop** -- gradient accumulation, time-based progress tracking, LR scheduling (linear warmup + cosine warmdown), fast-fail on NaN/divergence
 - **Outputs** -- model checkpoints (`best_model.pt`), per-step loss curve (`loss_curve.csv`), summary metrics
 
-## AWS Deployment
+## Deployment Options
 
-Terraform config provisions a `g4dn.xlarge` (T4 16GB GPU, ~$0.53/hr) with the Deep Learning AMI:
+### AWS (recommended for autonomous agent runs)
+
+Terraform config provisions a `g4dn.xlarge` (T4 16GB GPU, ~$0.53/hr):
 
 ```bash
 cd terraform
 terraform init
 terraform apply -var="ssh_key_name=your-key"
+# SSH in, start Claude Code in tmux, let it run overnight
 ```
-
-The instance auto-bootstraps: clones the repo, installs dependencies, downloads data. SSH in and start the agent.
 
 | Duration | Cost | Experiments |
 |----------|------|-------------|
@@ -161,7 +162,23 @@ The instance auto-bootstraps: clones the repo, installs dependencies, downloads 
 | 6 hours | ~$3.18 | ~72 |
 | 12 hours | ~$6.36 | ~144 |
 
-See `terraform/` for full config including outputs for SSH command and Gradio URL.
+Stop instance (pause billing, keep data): `aws ec2 stop-instances --instance-ids <id>`
+Start again: `aws ec2 start-instances --instance-ids <id>`
+Destroy everything: `cd terraform && terraform destroy -var="ssh_key_name=your-key"`
+
+### Google Colab (free, for testing and demos)
+
+Open `colab.ipynb` in Colab, select T4 GPU runtime, run cells top to bottom. Free but limited: no autonomous agent (SSH blocked on free tier), sessions timeout after ~90 min idle.
+
+### Local (MacBook, for development)
+
+```bash
+uv run prepare.py --tiny    # 500 reactions for fast testing
+TIME_BUDGET=30 uv run train.py   # 30-second training run
+uv run app.py               # Frontend at localhost:7860
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed comparison of all three deployment options.
 
 ## Key Design Decisions
 
@@ -177,6 +194,21 @@ Additions specific to retrosynthesis:
 - **Loss masking.** Only reactant tokens contribute to the loss -- the model attends to product tokens but isn't penalized for predicting them.
 - **Bits-per-byte replaced by top-1 accuracy.** The metric is exact-match accuracy after SMILES canonicalization on 500 validation reactions.
 - **Multi-step retrosynthesis at inference.** The model predicts one step; the frontend recursively applies it, stopping when reactants are commercially available (checked against building blocks extracted from training data).
+
+## Results
+
+After 12 autonomous experiments on a T4 GPU, the agent improved validation accuracy from 34.2% to 50.2%:
+
+```
+baseline:                34.2%
++ higher LR (1e-3):     45.0%  (+10.8%)
++ smaller batch (2^12): 45.8%  (+0.8%)
++ label smoothing:      50.2%  (+4.4%)
+```
+
+The 4 demo molecules (aspirin, caffeine, ibuprofen, adipic acid) are **not in the training data** -- any successful prediction is genuine generalization from learned reaction patterns.
+
+See [HANDOFF.md](HANDOFF.md) for the full experiment log and next steps.
 
 ## Attribution
 
