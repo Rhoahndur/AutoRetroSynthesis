@@ -10,21 +10,22 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.2.6",
     "pandas>=2.3.3",
+    "plotly>=5.18.0",
     "pubchempy>=1.0.4",
     "rdkit>=2024.3.0",
     "requests>=2.32.0",
-    "torch>=2.2.0",
+    "torch>=2.4.0,<2.6.0",
 ]
 
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cu128", marker = "platform_system == 'Linux'" },
+    { index = "pytorch-cu124", marker = "platform_system == 'Linux'" },
     { index = "pytorch-cpu", marker = "platform_system == 'Darwin'" },
 ]
 
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [[tool.uv.index]]
