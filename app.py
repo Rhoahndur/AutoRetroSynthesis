@@ -28,6 +28,7 @@ _model = None
 _tokenizer = None
 _building_blocks = None
 _model_info = {}
+_model_mtime = 0  # track checkpoint file modification time
 
 
 def _get_device():
@@ -38,38 +39,50 @@ def _get_device():
     return torch.device("cpu")
 
 
+def _find_checkpoint():
+    """Find the best available checkpoint path and its mtime."""
+    for path in ("best_model.pt", "latest_model.pt"):
+        if os.path.exists(path):
+            return path, os.path.getmtime(path)
+    return None, 0
+
+
 def load_model():
-    global _model, _tokenizer, _model_info
-    if _model is not None:
-        return _model, _tokenizer
+    global _model, _tokenizer, _model_info, _model_mtime
 
     from prepare import SMILESTokenizer
     from model import GPT, GPTConfig
 
+    # Check if checkpoint has been updated since last load
+    ckpt_path, ckpt_mtime = _find_checkpoint()
+    if ckpt_path is None:
+        raise FileNotFoundError("No model checkpoint found. Run train.py first.")
+
+    if _model is not None and ckpt_mtime <= _model_mtime:
+        return _model, _tokenizer  # cached model is still current
+
+    # (Re)load model
+    if _model is not None:
+        print("Checkpoint updated, reloading model...")
+
     device = _get_device()
     _tokenizer = SMILESTokenizer.from_file()
 
-    # Try best_model.pt first, fall back to latest_model.pt
-    for path in ("best_model.pt", "latest_model.pt"):
-        if os.path.exists(path):
-            checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-            config = GPTConfig(**checkpoint["config"])
-            _model = GPT(config).to(device)
-            _model.load_state_dict(checkpoint["model_state_dict"])
-            _model.eval()
-            _model_info = {
-                "path": path,
-                "accuracy": checkpoint.get("val_accuracy", None),
-                "validity": checkpoint.get("val_validity", None),
-                "config": checkpoint.get("config", {}),
-                "modified": os.path.getmtime(path),
-            }
-            print(
-                f"Loaded model from {path} (accuracy={_model_info['accuracy']})"
-            )
-            return _model, _tokenizer
-
-    raise FileNotFoundError("No model checkpoint found. Run train.py first.")
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    config = GPTConfig(**checkpoint["config"])
+    _model = GPT(config).to(device)
+    _model.load_state_dict(checkpoint["model_state_dict"])
+    _model.eval()
+    _model_mtime = ckpt_mtime
+    _model_info = {
+        "path": ckpt_path,
+        "accuracy": checkpoint.get("val_accuracy", None),
+        "validity": checkpoint.get("val_validity", None),
+        "config": checkpoint.get("config", {}),
+        "modified": ckpt_mtime,
+    }
+    print(f"Loaded model from {ckpt_path} (accuracy={_model_info['accuracy']})")
+    return _model, _tokenizer
 
 
 def load_building_blocks():
